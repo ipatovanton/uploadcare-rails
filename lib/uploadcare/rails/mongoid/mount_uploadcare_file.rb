@@ -13,10 +13,6 @@ module Uploadcare
       module MountUploadcareFile
         extend ActiveSupport::Concern
 
-        included do
-          field :uploadcare_processing, type: Mongoid::Boolean, default: false
-        end
-
         def build_uploadcare_file(attribute)
           cdn_url = send(attribute).to_s
           return if cdn_url.empty?
@@ -35,12 +31,12 @@ module Uploadcare
             end
 
             define_method "uploadcare_store_#{attribute}!" do |store_job = StoreFileJob|
-              return if self.uploadcare_processing
+              return if self.instance_variable_get(:@uploadcare_processing)
 
               file_uuid = public_send(attribute)&.uuid
               return unless file_uuid
 
-              self.uploadcare_processing = true
+              self.instance_variable_set(:@uploadcare_processing, true)
 
               if Uploadcare::Rails.configuration.store_files_async
                 store_job.perform_later(file_uuid)
@@ -48,7 +44,7 @@ module Uploadcare
                 Uploadcare::FileApi.store_file(file_uuid)
               end
 
-              self.uploadcare_processing = false
+              self.instance_variable_set(:@uploadcare_processing, false)
             end
 
             define_method "uploadcare_delete_#{attribute}!" do |delete_job = DeleteFileJob|
@@ -63,7 +59,7 @@ module Uploadcare
             end
 
             set_callback(:save, :around) do |document, block|
-              if document.send("#{attribute}_changed?")
+              if document.changed.include?(attribute.to_s)
                 document.public_send("uploadcare_store_#{attribute}!")
               end
               block.call
