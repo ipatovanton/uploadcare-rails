@@ -46,7 +46,7 @@ module Uploadcare
             end
 
             unless Uploadcare::Rails.configuration.do_not_store
-              after_save :"uploadcare_store_#{attribute}!", if: :"will_save_change_to_#{attribute}?"
+              after_save :"uploadcare_store_#{attribute}!", if: proc { |record| record.attribute_will_change?(attribute) }
             end
 
             return unless Uploadcare::Rails.configuration.delete_files_after_destroy
