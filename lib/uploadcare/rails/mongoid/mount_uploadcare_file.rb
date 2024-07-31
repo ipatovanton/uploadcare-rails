@@ -9,8 +9,13 @@ require 'uploadcare/rails/jobs/store_file_job'
 module Uploadcare
   module Rails
     module Mongoid
+      # A module containing Mongoid extension. Allows to use uploadcare file methods in Rails models
       module MountUploadcareFile
         extend ActiveSupport::Concern
+
+        included do
+          attr_accessor :uploadcare_processing
+        end
 
         def build_uploadcare_file(attribute)
           cdn_url = send(attribute).to_s
@@ -24,35 +29,49 @@ module Uploadcare
         end
 
         class_methods do
+          # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           def mount_uploadcare_file(attribute)
             define_method attribute do
               build_uploadcare_file attribute
             end
 
             define_method "uploadcare_store_#{attribute}!" do |store_job = StoreFileJob|
+              return if uploadcare_processing
+
               file_uuid = public_send(attribute)&.uuid
               return unless file_uuid
-              return store_job.perform_later(file_uuid) if Uploadcare::Rails.configuration.store_files_async
 
-              Uploadcare::FileApi.store_file(file_uuid)
+              self.uploadcare_processing = true
+
+              if Uploadcare::Rails.configuration.store_files_async
+                store_job.perform_later(file_uuid)
+              else
+                Uploadcare::FileApi.store_file(file_uuid)
+              end
+
+              self.uploadcare_processing = false
             end
 
             define_method "uploadcare_delete_#{attribute}!" do |delete_job = DeleteFileJob|
               file_uuid = public_send(attribute)&.uuid
               return unless file_uuid
-              return delete_job.perform_later(file_uuid) if Uploadcare::Rails.configuration.delete_files_async
 
-              Uploadcare::FileApi.delete_file(file_uuid)
+              if Uploadcare::Rails.configuration.delete_files_async
+                delete_job.perform_later(file_uuid)
+              else
+                Uploadcare::FileApi.delete_file(file_uuid)
+              end
             end
 
             unless Uploadcare::Rails.configuration.do_not_store
-              set_callback(:save, :after, :"uploadcare_store_#{attribute}!", if: :"#{attribute}_changed?")
+              set_callback(:save, :after, :"uploadcare_store_#{attribute}!", if: -> { send("#{attribute}_changed?") })
             end
 
             return unless Uploadcare::Rails.configuration.delete_files_after_destroy
 
             set_callback(:destroy, :after, :"uploadcare_delete_#{attribute}!")
           end
+          # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         end
       end
     end
