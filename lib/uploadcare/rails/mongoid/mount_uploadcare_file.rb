@@ -14,7 +14,7 @@ module Uploadcare
         extend ActiveSupport::Concern
 
         included do
-          field :uploadcare_processing, type: Boolean, default: false
+          field :uploadcare_processing, type: Mongoid::Boolean, default: false
         end
 
         def build_uploadcare_file(attribute)
@@ -64,14 +64,14 @@ module Uploadcare
 
             set_callback(:save, :around) do |document, block|
               if document.send("#{attribute}_changed?")
-                document.uploadcare_store_#{attribute}!
+                document.public_send("uploadcare_store_#{attribute}!")
               end
               block.call
             end
 
             set_callback(:destroy, :before) do |document|
               if Uploadcare::Rails.configuration.delete_files_after_destroy
-                document.uploadcare_delete_#{attribute}!
+                document.public_send("uploadcare_delete_#{attribute}!")
               end
             end
           end
