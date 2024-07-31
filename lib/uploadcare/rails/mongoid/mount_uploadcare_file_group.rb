@@ -49,7 +49,9 @@ module Uploadcare
 
             unless Uploadcare::Rails.configuration.do_not_store
               after_save do
-                send("uploadcare_store_#{attribute}!") if changes[attribute.to_s]
+                if will_save_change_to_attribute?(attribute)
+                  send("uploadcare_store_#{attribute}!")
+                end
               end
             end
           end
