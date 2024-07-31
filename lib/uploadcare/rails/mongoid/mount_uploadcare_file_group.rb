@@ -9,13 +9,14 @@ require 'uploadcare/rails/jobs/store_group_job'
 module Uploadcare
   module Rails
     module Mongoid
+      # A module containing Mongoid extension. Allows to use uploadcare group methods in Rails models
       module MountUploadcareFileGroup
         extend ActiveSupport::Concern
 
         GROUP_ID_REGEX = /\b[0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12}\b~\d+/.freeze
 
         def build_uploadcare_file_group(attribute)
-          cdn_url = attributes[attribute.to_s].to_s
+          cdn_url = send(attribute).to_s
           return if cdn_url.empty?
 
           group_id = IdExtractor.call(cdn_url, GROUP_ID_REGEX).presence
@@ -44,7 +45,7 @@ module Uploadcare
               Uploadcare::GroupApi.store_group(group_id)
             end
 
-            after_save :"uploadcare_store_#{attribute}!", if: proc { |record| record.changed_attributes.key?(attribute) } unless Uploadcare::Rails.configuration.do_not_store
+            set_callback(:save, :after, :"uploadcare_store_#{attribute}!") unless Uploadcare::Rails.configuration.do_not_store
           end
         end
       end
