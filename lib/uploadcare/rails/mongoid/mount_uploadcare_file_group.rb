@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require 'mongoid'
 require 'active_support/concern'
 require 'uploadcare/rails/services/id_extractor'
@@ -9,18 +7,14 @@ require 'uploadcare/rails/jobs/store_group_job'
 module Uploadcare
   module Rails
     module Mongoid
-      # A module containing Mongoid extension. Allows to use uploadcare group methods in Rails models
+      # A module containing Mongoid extension. Allows to use uploadcare group methods in Mongoid models
       module MountUploadcareFileGroup
         extend ActiveSupport::Concern
 
-        GROUP_ID_REGEX = /\b[0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12}\b~\d+/.freeze
-
-        included do
-          attr_accessor :uploadcare_processing
-        end
+        GROUP_ID_REGEX = /\b[0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12}\b~\d/.freeze
 
         def build_uploadcare_file_group(attribute)
-          cdn_url = send(attribute).to_s
+          cdn_url = read_attribute(attribute).to_s
           return if cdn_url.empty?
 
           group_id = IdExtractor.call(cdn_url, GROUP_ID_REGEX).presence
@@ -32,6 +26,7 @@ module Uploadcare
         end
 
         class_methods do
+          # rubocop:disable Metrics/MethodLength
           def mount_uploadcare_file_group(attribute)
             define_singleton_method "has_uploadcare_file_group_for_#{attribute}?" do
               true
@@ -42,24 +37,16 @@ module Uploadcare
             end
 
             define_method "uploadcare_store_#{attribute}!" do |store_job = StoreGroupJob|
-              return if uploadcare_processing
-
               group_id = public_send(attribute)&.id
               return unless group_id
+              return store_job.perform_later(group_id) if Uploadcare::Rails.configuration.store_files_async
 
-              self.uploadcare_processing = true
-
-              if Uploadcare::Rails.configuration.store_files_async
-                store_job.perform_later(group_id)
-              else
-                Uploadcare::GroupApi.store_group(group_id)
-              end
-
-              self.uploadcare_processing = false
+              Uploadcare::GroupApi.store_group(group_id)
             end
 
-            set_callback(:save, :after, :"uploadcare_store_#{attribute}!") unless Uploadcare::Rails.configuration.do_not_store
+            after_save "uploadcare_store_#{attribute}!".to_sym unless Uploadcare::Rails.configuration.do_not_store
           end
+          # rubocop:enable Metrics/MethodLength
         end
       end
     end
