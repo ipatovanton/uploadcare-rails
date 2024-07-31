@@ -15,11 +15,11 @@ module Uploadcare
         GROUP_ID_REGEX = /\b[0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12}\b~\d+/.freeze
 
         def build_uploadcare_file_group(attribute)
-          cdn_url = send(attribute).to_s
+          cdn_url = attributes[attribute.to_s].to_s
           return if cdn_url.empty?
 
           group_id = IdExtractor.call(cdn_url, GROUP_ID_REGEX).presence
-          cache_key = Uploadcare::Rails::File.build_cache_key(cdn_url)
+          cache_key = File.build_cache_key(cdn_url)
           files_count = FilesCountExtractor.call(group_id)
           default_attributes = { cdn_url: cdn_url, id: group_id, files_count: files_count }
           file_attributes = ::Rails.cache.read(cache_key).presence || default_attributes
@@ -33,27 +33,18 @@ module Uploadcare
             end
 
             define_method attribute do
-              build_uploadcare_file_group(attribute)
+              build_uploadcare_file_group attribute
             end
 
             define_method "uploadcare_store_#{attribute}!" do |store_job = StoreGroupJob|
               group_id = public_send(attribute)&.id
               return unless group_id
+              return store_job.perform_later(group_id) if Uploadcare::Rails.configuration.store_files_async
 
-              if Uploadcare::Rails.configuration.store_files_async
-                store_job.perform_later(group_id)
-              else
-                Uploadcare::GroupApi.store_group(group_id)
-              end
+              Uploadcare::GroupApi.store_group(group_id)
             end
 
-            unless Uploadcare::Rails.configuration.do_not_store
-              after_save do
-                if will_save_change_to_attribute?(attribute)
-                  send("uploadcare_store_#{attribute}!")
-                end
-              end
-            end
+            after_save :"uploadcare_store_#{attribute}!", if: proc { |record| record.changed_attributes.key?(attribute) } unless Uploadcare::Rails.configuration.do_not_store
           end
         end
       end
