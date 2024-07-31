@@ -14,7 +14,7 @@ module Uploadcare
         extend ActiveSupport::Concern
 
         included do
-          attr_accessor :uploadcare_processing
+          field :uploadcare_processing, type: Boolean, default: false
         end
 
         def build_uploadcare_file(attribute)
@@ -22,21 +22,20 @@ module Uploadcare
           return if cdn_url.empty?
 
           uuid = IdExtractor.call(cdn_url)
-          cache_key = File.build_cache_key(cdn_url)
+          cache_key = Uploadcare::Rails::File.build_cache_key(cdn_url)
           default_attributes = { cdn_url: cdn_url, uuid: uuid.presence }
           file_attributes = ::Rails.cache.read(cache_key).presence || default_attributes
           Uploadcare::Rails::File.new(file_attributes)
         end
 
         class_methods do
-          # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           def mount_uploadcare_file(attribute)
             define_method attribute do
-              build_uploadcare_file attribute
+              build_uploadcare_file(attribute)
             end
 
             define_method "uploadcare_store_#{attribute}!" do |store_job = StoreFileJob|
-              return if uploadcare_processing
+              return if self.uploadcare_processing
 
               file_uuid = public_send(attribute)&.uuid
               return unless file_uuid
@@ -63,15 +62,19 @@ module Uploadcare
               end
             end
 
-            unless Uploadcare::Rails.configuration.do_not_store
-              set_callback(:save, :after, :"uploadcare_store_#{attribute}!", if: -> { send("#{attribute}_changed?") })
+            set_callback(:save, :around) do |document, block|
+              if document.send("#{attribute}_changed?")
+                document.uploadcare_store_#{attribute}!
+              end
+              block.call
             end
 
-            return unless Uploadcare::Rails.configuration.delete_files_after_destroy
-
-            set_callback(:destroy, :after, :"uploadcare_delete_#{attribute}!")
+            set_callback(:destroy, :before) do |document|
+              if Uploadcare::Rails.configuration.delete_files_after_destroy
+                document.uploadcare_delete_#{attribute}!
+              end
+            end
           end
-          # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         end
       end
     end
