@@ -15,6 +15,10 @@ module Uploadcare
 
         GROUP_ID_REGEX = /\b[0-9a-f]{8}\b-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-\b[0-9a-f]{12}\b~\d+/.freeze
 
+        included do
+          attr_accessor :uploadcare_processing
+        end
+
         def build_uploadcare_file_group(attribute)
           cdn_url = send(attribute).to_s
           return if cdn_url.empty?
@@ -38,11 +42,20 @@ module Uploadcare
             end
 
             define_method "uploadcare_store_#{attribute}!" do |store_job = StoreGroupJob|
+              return if uploadcare_processing
+
               group_id = public_send(attribute)&.id
               return unless group_id
-              return store_job.perform_later(group_id) if Uploadcare::Rails.configuration.store_files_async
 
-              Uploadcare::GroupApi.store_group(group_id)
+              self.uploadcare_processing = true
+
+              if Uploadcare::Rails.configuration.store_files_async
+                store_job.perform_later(group_id)
+              else
+                Uploadcare::GroupApi.store_group(group_id)
+              end
+
+              self.uploadcare_processing = false
             end
 
             set_callback(:save, :after, :"uploadcare_store_#{attribute}!") unless Uploadcare::Rails.configuration.do_not_store
