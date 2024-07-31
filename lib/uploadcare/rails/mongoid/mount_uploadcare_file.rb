@@ -13,11 +13,11 @@ module Uploadcare
         extend ActiveSupport::Concern
 
         def build_uploadcare_file(attribute)
-          cdn_url = send(attribute).to_s
+          cdn_url = attributes[attribute.to_s].to_s
           return if cdn_url.empty?
 
           uuid = IdExtractor.call(cdn_url)
-          cache_key = Uploadcare::Rails::File.build_cache_key(cdn_url)
+          cache_key = File.build_cache_key(cdn_url)
           default_attributes = { cdn_url: cdn_url, uuid: uuid.presence }
           file_attributes = ::Rails.cache.read(cache_key).presence || default_attributes
           Uploadcare::Rails::File.new(file_attributes)
@@ -26,44 +26,32 @@ module Uploadcare
         class_methods do
           def mount_uploadcare_file(attribute)
             define_method attribute do
-              build_uploadcare_file(attribute)
+              build_uploadcare_file attribute
             end
 
             define_method "uploadcare_store_#{attribute}!" do |store_job = StoreFileJob|
               file_uuid = public_send(attribute)&.uuid
               return unless file_uuid
+              return store_job.perform_later(file_uuid) if Uploadcare::Rails.configuration.store_files_async
 
-              if Uploadcare::Rails.configuration.store_files_async
-                store_job.perform_later(file_uuid)
-              else
-                Uploadcare::FileApi.store_file(file_uuid)
-              end
+              Uploadcare::FileApi.store_file(file_uuid)
             end
 
             define_method "uploadcare_delete_#{attribute}!" do |delete_job = DeleteFileJob|
               file_uuid = public_send(attribute)&.uuid
               return unless file_uuid
+              return delete_job.perform_later(file_uuid) if Uploadcare::Rails.configuration.delete_files_async
 
-              if Uploadcare::Rails.configuration.delete_files_async
-                delete_job.perform_later(file_uuid)
-              else
-                Uploadcare::FileApi.delete_file(file_uuid)
-              end
+              Uploadcare::FileApi.delete_file(file_uuid)
             end
 
             unless Uploadcare::Rails.configuration.do_not_store
-              after_save do
-                if will_save_change_to_attribute?(attribute)
-                  send("uploadcare_store_#{attribute}!")
-                end
-              end
+              after_save :"uploadcare_store_#{attribute}!", if: :"will_save_change_to_#{attribute}?"
             end
 
-            if Uploadcare::Rails.configuration.delete_files_after_destroy
-              after_destroy do
-                send("uploadcare_delete_#{attribute}!")
-              end
-            end
+            return unless Uploadcare::Rails.configuration.delete_files_after_destroy
+
+            after_destroy :"uploadcare_delete_#{attribute}!"
           end
         end
       end
