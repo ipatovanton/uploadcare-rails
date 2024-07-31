@@ -13,7 +13,7 @@ module Uploadcare
         extend ActiveSupport::Concern
 
         def build_uploadcare_file(attribute)
-          cdn_url = attributes[attribute.to_s].to_s
+          cdn_url = send(attribute).to_s
           return if cdn_url.empty?
 
           uuid = IdExtractor.call(cdn_url)
@@ -46,12 +46,12 @@ module Uploadcare
             end
 
             unless Uploadcare::Rails.configuration.do_not_store
-              after_save :"uploadcare_store_#{attribute}!", if: proc { |record| record.changed_attributes.key?(attribute) }
+              set_callback(:save, :after, :"uploadcare_store_#{attribute}!", if: :"#{attribute}_changed?")
             end
 
             return unless Uploadcare::Rails.configuration.delete_files_after_destroy
 
-            after_destroy :"uploadcare_delete_#{attribute}!"
+            set_callback(:destroy, :after, :"uploadcare_delete_#{attribute}!")
           end
         end
       end
